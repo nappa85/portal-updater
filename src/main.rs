@@ -32,7 +32,7 @@ async fn main() -> Result<(), ()> {
         .query("SELECT id FROM pokestop WHERE name IS NULL").await
         .map_err(|e| error!("MySQL pokestop select query error: {}", e))?;
 
-    let https = HttpsConnector::new().map_err(|e| error!("error creating HttpsConnector: {}", e))?;
+    let https = HttpsConnector::new();
     let client = Client::builder().build::<_, Body>(https);
     let mut intel = Intel::new(&client, USERNAME.as_str(), PASSWORD.as_str());
 
