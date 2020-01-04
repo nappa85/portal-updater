@@ -13,7 +13,7 @@ use ingress_intel_rs::Intel;
 
 // use tokio::timer::delay;
 
-use log::error;
+use log::{error, info};
 
 static DATABASE_URL: Lazy<String> = Lazy::new(|| env::var("DATABASE_URL").expect("Missing DATABASE_URL env var"));
 static USERNAME: Lazy<String> = Lazy::new(|| env::var("USERNAME").expect("Missing USERNAME env var"));
@@ -38,6 +38,9 @@ async fn main() -> Result<(), ()> {
 
     let (mut conn, ids): (_, Vec<String>) = res.collect_and_drop().await
         .map_err(|e| error!("MySQL pokestop collect query error: {}", e))?;
+
+    info!("Found {} unnamed pokestops", ids.len());
+
     for id in ids {
         match intel.get_portal_details(&id).await {
             Ok(details) => {
@@ -60,6 +63,9 @@ async fn main() -> Result<(), ()> {
 
     let (mut conn, ids): (_, Vec<String>) = res.collect_and_drop().await
         .map_err(|e| error!("MySQL gym collect query error: {}", e))?;
+
+    info!("Found {} unnamed gyms", ids.len());
+
     for id in ids {
         match intel.get_portal_details(&id).await {
             Ok(details) => {
