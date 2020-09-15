@@ -23,20 +23,46 @@ static PASSWORD: Lazy<String> = Lazy::new(|| env::var("PASSWORD").expect("Missin
 async fn main() -> Result<(), ()> {
     env_logger::init();
 
-    let res = Conn::new(DATABASE_URL.as_str()).await
-        .map_err(|e| error!("MySQL connection error: {}", e))?
-        .drop_query("UPDATE gym INNER JOIN pokestop ON gym.id = pokestop.id SET gym.name=pokestop.name, gym.url=pokestop.url WHERE gym.id = pokestop.id").await
-        .map_err(|e| error!("MySQL update query error: {}", e))?
-        .drop_query("DELETE pokestop FROM pokestop INNER JOIN gym ON pokestop.id = gym.id WHERE pokestop.id IS NOT NULL").await
-        .map_err(|e| error!("MySQL delete query error: {}", e))?
-        .query("SELECT id FROM pokestop WHERE name IS NULL").await
-        .map_err(|e| error!("MySQL pokestop select query error: {}", e))?;
+    let conn = Conn::new(DATABASE_URL.as_str()).await
+        .map_err(|e| error!("MySQL connection error: {}", e))?;
 
+    let (mut conn, ids): (_, Vec<String>) = conn.query("SELECT pokestop.id FROM pokestop INNER JOIN gym ON pokestop.id = gym.id AND gym.name IS NULL").await
+        .map_err(|e| error!("MySQL new gyms select query error: {}", e))?
+        .collect_and_drop().await
+        .map_err(|e| error!("MySQL new gyms collect query error: {}", e))?;
+
+    if !ids.is_empty() {
+        info!("Upgrading {} pokestops to gyms", ids.len());
+
+        let query = format!("UPDATE gym INNER JOIN pokestop ON gym.id = pokestop.id SET gym.name=pokestop.name, gym.url=pokestop.url WHERE gym.id IN ('{}')", ids.join("', '"));
+        conn = conn.drop_query(&query).await
+            .map_err(|e| error!("MySQL gym update query error: {}", e))?
+            .drop_query("DELETE pokestop FROM pokestop INNER JOIN gym ON pokestop.id = gym.id WHERE pokestop.id IS NOT NULL").await
+            .map_err(|e| error!("MySQL delete pokestops query error: {}", e))?;
+    }
+
+    let (mut conn, ids): (_, Vec<String>) = conn.query("SELECT gym.id FROM gym INNER JOIN pokestop ON gym.id = pokestop.id AND pokestop.name IS NULL").await
+        .map_err(|e| error!("MySQL new pokestops select query error: {}", e))?
+        .collect_and_drop().await
+        .map_err(|e| error!("MySQL new pokestops collect query error: {}", e))?;
+
+    if !ids.is_empty() {
+        info!("Downgrading {} gyms to pokestops", ids.len());
+
+        let query = format!("UPDATE pokestop INNER JOIN gym ON pokestop.id = gym.id SET pokestop.name=gym.name, pokestop.url=gym.url WHERE pokestop.id IN ('{}')", ids.join("', '"));
+        conn = conn.drop_query(&query).await
+            .map_err(|e| error!("MySQL pokestops update query error: {}", e))?
+            .drop_query("DELETE gym FROM gym INNER JOIN pokestop ON gym.id = pokestop.id WHERE gym.id IS NOT NULL").await
+            .map_err(|e| error!("MySQL delete gyms query error: {}", e))?;
+    }
+    
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, Body>(https);
     let mut intel = Intel::new(&client, USERNAME.as_str(), PASSWORD.as_str());
 
-    let (mut conn, ids): (_, Vec<String>) = res.collect_and_drop().await
+    let (mut conn, ids): (_, Vec<String>) = conn.query("SELECT id FROM pokestop WHERE name IS NULL").await
+        .map_err(|e| error!("MySQL pokestop select query error: {}", e))?
+        .collect_and_drop().await
         .map_err(|e| error!("MySQL pokestop collect query error: {}", e))?;
 
     info!("Found {} unnamed pokestops", ids.len());
