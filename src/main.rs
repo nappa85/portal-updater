@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, sync::Arc};
 // use std::time::{Instant, Duration};
 
 use mysql_async::{params, Conn, prelude::Queryable};
@@ -6,6 +6,8 @@ use mysql_async::{params, Conn, prelude::Queryable};
 use once_cell::sync::Lazy;
 
 use ingress_intel_rs::Intel;
+
+use reqwest::{Url, cookie::CookieStore, ClientBuilder, cookie::Jar};
 
 // use tokio::timer::delay;
 
@@ -15,6 +17,9 @@ static DATABASE_URL: Lazy<String> = Lazy::new(|| env::var("DATABASE_URL").expect
 static USERNAME: Lazy<Option<String>> = Lazy::new(|| env::var("USERNAME").ok());
 static PASSWORD: Lazy<Option<String>> = Lazy::new(|| env::var("PASSWORD").ok());
 static COOKIES: Lazy<Option<String>> = Lazy::new(|| env::var("COOKIES").ok());
+static RDM_URL: Lazy<Option<String>> = Lazy::new(|| env::var("RDM_URL").ok());
+static RDM_USERNAME: Lazy<Option<String>> = Lazy::new(|| env::var("RDM_USERNAME").ok());
+static RDM_PASSWORD: Lazy<Option<String>> = Lazy::new(|| env::var("RDM_PASSWORD").ok());
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -109,6 +114,69 @@ async fn main() -> Result<(), ()> {
 
         // wait 1 second between requests
         // delay(Instant::now() + Duration::from_secs(1)).await;
+    }
+
+    if let Some(url) = RDM_URL.as_ref() {
+        // start a new client with cookie jar
+        let jar = Arc::new(Jar::default());
+        let client = ClientBuilder::new()
+            .cookie_store(true)
+            .cookie_provider(Arc::clone(&jar))
+            .build()
+            .map_err(|e| error!("RDM client build error: {}", e))?;
+        // first call login to get CSRF-TOKEN
+        let login_url = Url::parse(&format!("{}/login", url))
+            .map_err(|e| error!("RDM URL parse error: {}", e))?;
+        client.get(login_url.clone())
+            .send()
+            .await
+            .map_err(|e| error!("RDM get login error: {}", e))?
+            .error_for_status()
+            .map_err(|e| error!("RDM get login failed: {}", e))?;
+        // extract CSRF-TOKEN
+        let csrf_token = jar.cookies(&login_url)
+            .and_then(|s| {
+                s.to_str()
+                    .ok()
+                    .and_then(|s| {
+                        s.split(';')
+                            .map(|ss| ss.split('=').collect::<Vec<_>>())
+                            .find(|sv| (&sv[0]).trim().eq_ignore_ascii_case("CSRF-TOKEN"))
+                            .map(|mut sv| sv.remove(1))
+                    })
+                    .map(|s| s.to_owned())
+            });
+        if csrf_token.is_none() {
+            error!("Can't find CSRF-TOKEN header");
+            return Err(());
+        }
+        // login
+        client.post(login_url.clone())
+            .header("Referer", login_url.to_string())
+            .form(&vec![
+                ("username-email", RDM_USERNAME.as_deref()),
+                ("password", RDM_PASSWORD.as_deref()),
+                ("_csrf", csrf_token.as_deref())
+            ])
+            .send()
+            .await
+            .map_err(|e| error!("RDM post login error: {}", e))?
+            .error_for_status()
+            .map_err(|e| error!("RDM post login failed: {}", e))?;
+        // clear cache
+        let dashboard_url = Url::parse(&format!("{}/dashboard/utilities", url))
+            .map_err(|e| error!("RDM URL parse error: {}", e))?;
+        client.post(dashboard_url.clone())
+            .header("Referer", dashboard_url.to_string())
+            .form(&vec![
+                ("action", Some("clear_memcache")),
+                ("_csrf", csrf_token.as_deref())
+            ])
+            .send()
+            .await
+            .map_err(|e| error!("RDM clear cache error: {}", e))?
+            .error_for_status()
+            .map_err(|e| error!("RDM clear cache failed: {}", e))?;
     }
 
     Ok(())
