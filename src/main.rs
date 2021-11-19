@@ -23,12 +23,12 @@ static RDM_PASSWORD: Lazy<Option<String>> = Lazy::new(|| env::var("RDM_PASSWORD"
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
-    env_logger::init();
+    tracing_subscriber::fmt::init();
 
-    let mut conn = Conn::new(DATABASE_URL.as_str()).await
+    let mut conn = Conn::from_url(DATABASE_URL.as_str()).await
         .map_err(|e| error!("MySQL connection error: {}", e))?;
 
-    let ids: Vec<String> = conn.query_iter("SELECT pokestop.id FROM pokestop INNER JOIN gym ON pokestop.id = gym.id AND gym.name IS NULL").await
+    let ids: Vec<String> = conn.query_iter("SELECT pokestop.id FROM pokestop INNER JOIN gym ON pokestop.id = gym.id AND (gym.name IS NULL OR gym.name = 'unknown')").await
         .map_err(|e| error!("MySQL new gyms select query error: {}", e))?
         .collect_and_drop().await
         .map_err(|e| error!("MySQL new gyms collect query error: {}", e))?;
@@ -43,7 +43,7 @@ async fn main() -> Result<(), ()> {
             .map_err(|e| error!("MySQL delete pokestops query error: {}", e))?;
     }
 
-    let ids: Vec<String> = conn.query_iter("SELECT gym.id FROM gym INNER JOIN pokestop ON gym.id = pokestop.id AND pokestop.name IS NULL").await
+    let ids: Vec<String> = conn.query_iter("SELECT gym.id FROM gym INNER JOIN pokestop ON gym.id = pokestop.id AND (pokestop.name IS NULL OR pokestop.name = 'unknown')").await
         .map_err(|e| error!("MySQL new pokestops select query error: {}", e))?
         .collect_and_drop().await
         .map_err(|e| error!("MySQL new pokestops collect query error: {}", e))?;
@@ -68,7 +68,7 @@ async fn main() -> Result<(), ()> {
         }
     }
 
-    let ids: Vec<String> = conn.query_iter("SELECT id FROM pokestop WHERE name IS NULL").await
+    let ids: Vec<String> = conn.query_iter("SELECT id FROM pokestop WHERE name IS NULL OR name = 'unknown'").await
         .map_err(|e| error!("MySQL pokestop select query error: {}", e))?
         .collect_and_drop().await
         .map_err(|e| error!("MySQL pokestop collect query error: {}", e))?;
@@ -92,7 +92,7 @@ async fn main() -> Result<(), ()> {
         // delay(Instant::now() + Duration::from_secs(1)).await;
     }
 
-    let ids: Vec<String> = conn.query_iter("SELECT id FROM gym WHERE name IS NULL").await
+    let ids: Vec<String> = conn.query_iter("SELECT id FROM gym WHERE name IS NULL OR name = 'unknown'").await
         .map_err(|e| error!("MySQL gym select query error: {}", e))?
         .collect_and_drop().await
         .map_err(|e| error!("MySQL gym collect query error: {}", e))?;
