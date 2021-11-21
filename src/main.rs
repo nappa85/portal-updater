@@ -11,7 +11,7 @@ use reqwest::{Url, cookie::CookieStore, ClientBuilder, cookie::Jar};
 
 // use tokio::timer::delay;
 
-use log::{error, info};
+use tracing::{error, info};
 
 static DATABASE_URL: Lazy<String> = Lazy::new(|| env::var("DATABASE_URL").expect("Missing DATABASE_URL env var"));
 static USERNAME: Lazy<Option<String>> = Lazy::new(|| env::var("USERNAME").ok());
